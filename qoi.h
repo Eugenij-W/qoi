@@ -298,6 +298,21 @@ The returned qoi data should be free()d after use. */
 void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len);
 
 
+/* allocate QOI image buffer in memory.
+
+The returned data should be free() after use by QOI_FREE() */
+
+void *qoi_destignation(const qoi_desc *desc);
+
+/* Encode raw RGB or RGBA pixels into a QOI image in memory.
+
+The function either returns 0 on failure (invalid parameters) or length of
+the encoded data on success.
+
+The dest must be allocated by qoi_destignation() and free by QOI_FREE() */
+
+int qoi_encode_inplace(const void *data, const qoi_desc *desc, void *dest);
+
 /* Decode a QOI image from memory.
 
 The function either returns NULL on failure (invalid parameters or malloc
@@ -373,16 +388,12 @@ static unsigned int qoi_read_32(const unsigned char *bytes, int *p) {
 	return a << 24 | b << 16 | c << 8 | d;
 }
 
-void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
-	int i, max_size, p, run;
-	int px_len, px_end, px_pos, channels;
-	unsigned char *bytes;
-	const unsigned char *pixels;
-	qoi_rgba_t index[64];
-	qoi_rgba_t px, px_prev;
+
+void *qoi_destignation(const qoi_desc *desc) {
+    int max_size;
 
 	if (
-		data == NULL || out_len == NULL || desc == NULL ||
+		desc == NULL ||
 		desc->width == 0 || desc->height == 0 ||
 		desc->channels < 3 || desc->channels > 4 ||
 		desc->colorspace > 1 ||
@@ -395,11 +406,43 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 		desc->width * desc->height * (desc->channels + 1) +
 		QOI_HEADER_SIZE + sizeof(qoi_padding);
 
-	p = 0;
-	bytes = (unsigned char *) QOI_MALLOC(max_size);
-	if (!bytes) {
+	return QOI_MALLOC(max_size);
+}
+
+
+void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
+
+    void * p;
+
+    p = qoi_destignation(desc);
+    if (p == NULL)
+        return NULL;
+
+    *out_len = qoi_encode_inplace(data, desc, p);
+    return p;
+}
+
+
+int qoi_encode_inplace(const void *data, const qoi_desc *desc, void *out) {
+	int i, max_size, p, run;
+	int px_len, px_end, px_pos, channels;
+	unsigned char *bytes;
+	const unsigned char *pixels;
+	qoi_rgba_t index[64];
+	qoi_rgba_t px, px_prev;
+
+	if (
+		data == NULL || desc == NULL || out == NULL ||
+		desc->width == 0 || desc->height == 0 ||
+		desc->channels < 3 || desc->channels > 4 ||
+		desc->colorspace > 1 ||
+		desc->height >= QOI_PIXELS_MAX / desc->width
+	) {
 		return NULL;
 	}
+
+	p = 0;
+	bytes = (unsigned char *) out;
 
 	qoi_write_32(bytes, &p, QOI_MAGIC);
 	qoi_write_32(bytes, &p, desc->width);
@@ -502,8 +545,7 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 		bytes[p++] = qoi_padding[i];
 	}
 
-	*out_len = p;
-	return bytes;
+	return p;
 }
 
 void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
